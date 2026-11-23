@@ -1,0 +1,62 @@
+name: Build TWRP for Redmi A3x (klein)
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_branch:
+        description: 'Ветка манифеста TWRP (рекомендуется twrp-12.1)'
+        required: true
+        default: 'twrp-12.1'
+
+jobs:
+  build:
+    name: Build TWRP vendor_boot
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Очистка лишнего места на диске раннера
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h
+
+      - name: Установка пакетов для сборки Android
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3-is-python
+
+      - name: Настройка Git и установка Repo
+        run: |
+          git config --global user.name "Builder"
+          git config --global user.email "builder@github.com"
+          mkdir -p ~/bin
+          curl https://googleapis.com > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Инициализация и синхронизация манифеста TWRP
+        run: |
+          mkdir -p ~/twrp
+          cd ~/twrp
+          repo init --depth=1 -u https://github.com -b ${{ github.event.inputs.manifest_branch }}
+          repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+
+      - name: Клонирование Device Tree (в путь device/xiaomi/missi)
+        run: |
+          cd ~/twrp
+          git clone --depth=1 https://github.com -b twrp-new device/xiaomi/missi
+
+      - name: Компиляция vendor_boot.img
+        run: |
+          cd ~/twrp
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export USE_CCACHE=1
+          source build/envsetup.sh
+          lunch twrp_klein-eng
+          mka vendorbootimage -j$(nproc --all)
+
+      - name: Загрузка готового vendor_boot.img в Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TWRP-Redmi-A3x-klein-vendor_boot
+          path: ~/twrp/out/target/product/missi/vendor_boot.img
